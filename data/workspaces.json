@@ -1,0 +1,18 @@
+{
+  "workspaces": [
+    {
+      "id": "1004d759-3a3b-4699-a451-b4a0891efe89",
+      "selectedCourseIds": [],
+      "completedCourseIds": []
+    },
+    {
+      "id": "9fa4ad3a-2a55-4170-9461-f2051810e676",
+      "selectedCourseIds": [
+        3,
+        1,
+        4
+      ],
+      "completedCourseIds": []
+    }
+  ]
+}

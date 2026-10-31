@@ -1,16 +1,11 @@
 {
   "name": "e-learning-course-path-optimizer",
   "version": "1.0.0",
-  "description": "",
+  "description": "Personalized E-Learning Course Path Optimizer using C++ and Node.js",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "express": "^5.3.0"
   }

@@ -4,17 +4,36 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 const DATA_FILE = path.join(__dirname, "data", "courses.json");
+const WORKSPACES_FILE = path.join(__dirname, "data", "workspaces.json");
 const ENGINE_FILE = path.join(__dirname, "cpp", "engine.exe");
-const WEB_FOLDER = path.join(__dirname, "web");
+const DOCS_FOLDER = path.join(__dirname, "docs");
 
-app.use(express.json());
-app.use(express.static(WEB_FOLDER));
+app.use(express.json({ limit: "1mb" }));
+
+// Local development and GitHub Pages access.
+app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+});
+
+app.use(express.static(DOCS_FOLDER));
+
+function readJSON(file, fallback) {
+    if (!fs.existsSync(file)) {
+        fs.writeFileSync(file, JSON.stringify(fallback, null, 2));
+    }
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+}
 
 function readCourses() {
-    const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    const data = readJSON(DATA_FILE, { courses: [] });
     return Array.isArray(data.courses) ? data.courses : [];
 }
 
@@ -26,69 +45,85 @@ function saveCourses(courses) {
     );
 }
 
+function readWorkspaces() {
+    const data = readJSON(WORKSPACES_FILE, { workspaces: [] });
+    return Array.isArray(data.workspaces) ? data.workspaces : [];
+}
+
+function saveWorkspaces(workspaces) {
+    fs.writeFileSync(
+        WORKSPACES_FILE,
+        JSON.stringify({ workspaces }, null, 2),
+        "utf8"
+    );
+}
+
+function validWorkspaceId(id) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
+function getWorkspace(id) {
+    const workspaces = readWorkspaces();
+    let workspace = workspaces.find(item => item.id === id);
+
+    if (!workspace) {
+        workspace = {
+            id,
+            selectedCourseIds: [],
+            completedCourseIds: []
+        };
+        workspaces.push(workspace);
+        saveWorkspaces(workspaces);
+    }
+
+    return workspace;
+}
+
 app.get("/", (req, res) => {
-    res.sendFile(path.join(WEB_FOLDER, "index.html"));
+    res.sendFile(path.join(DOCS_FOLDER, "index.html"));
 });
 
+// Get shared courses.
 app.get("/api/courses", (req, res) => {
     try {
-        res.json(readCourses());
+        res.json({ courses: readCourses() });
     } catch (error) {
-        res.status(500).json({ error: "Could not read course data." });
+        res.status(500).json({ error: "Could not read courses." });
     }
 });
 
+// Add a course to the shared catalogue.
 app.post("/api/courses", (req, res) => {
     try {
         const courses = readCourses();
         const {
-            name,
-            category,
-            duration,
-            rating,
-            popularity,
-            prerequisites
+            name, category, duration, rating, popularity, prerequisites
         } = req.body;
 
         if (
-            typeof name !== "string" ||
-            !name.trim() ||
-            name.length > 150 ||
-            typeof category !== "string" ||
-            !category.trim() ||
-            !Number.isFinite(duration) ||
-            duration <= 0 ||
-            !Number.isFinite(rating) ||
-            rating < 0 ||
-            rating > 5 ||
-            !Number.isInteger(popularity) ||
-            popularity < 0 ||
-            popularity > 100 ||
+            typeof name !== "string" || !name.trim() ||
+            name.trim().length > 150 ||
+            typeof category !== "string" || !category.trim() ||
+            !Number.isFinite(duration) || duration <= 0 ||
+            !Number.isFinite(rating) || rating < 0 || rating > 5 ||
+            !Number.isInteger(popularity) || popularity < 0 || popularity > 100 ||
             !Array.isArray(prerequisites) ||
             !prerequisites.every(Number.isInteger)
         ) {
-            return res.status(400).json({
-                error: "Please provide valid course details."
-            });
+            return res.status(400).json({ error: "Enter valid course details." });
         }
 
         const existingIds = new Set(courses.map(course => course.id));
 
         if (prerequisites.some(id => !existingIds.has(id))) {
-            return res.status(400).json({
-                error: "A prerequisite course does not exist."
-            });
+            return res.status(400).json({ error: "Invalid prerequisite selected." });
         }
 
         if (new Set(prerequisites).size !== prerequisites.length) {
-            return res.status(400).json({
-                error: "Duplicate prerequisites are not allowed."
-            });
+            return res.status(400).json({ error: "Duplicate prerequisites are not allowed." });
         }
 
-        const id = courses.reduce(
-            (max, course) => Math.max(max, course.id), 0
-        ) + 1;
+        const id = courses.reduce((max, course) => Math.max(max, course.id), 0) + 1;
 
         const course = {
             id,
@@ -97,144 +132,208 @@ app.post("/api/courses", (req, res) => {
             duration,
             rating,
             popularity,
-            prerequisites,
-            completed: false
+            prerequisites
         };
 
         courses.push(course);
         saveCourses(courses);
-
         res.status(201).json(course);
     } catch (error) {
-        res.status(500).json({ error: "Could not save the course." });
+        res.status(500).json({ error: "Could not add course." });
     }
 });
 
-app.patch("/api/courses/:id", (req, res) => {
+// Get a visitor's own learning list.
+app.get("/api/workspaces/:id", (req, res) => {
     try {
-        const id = Number(req.params.id);
-        const { completed } = req.body;
+        const id = req.params.id;
 
-        if (!Number.isInteger(id) || typeof completed !== "boolean") {
-            return res.status(400).json({
-                error: "Provide a valid course ID and completion status."
-            });
+        if (!validWorkspaceId(id)) {
+            return res.status(400).json({ error: "Invalid workspace ID." });
+        }
+
+        const workspace = getWorkspace(id);
+
+        res.json({
+            selectedCourseIds: workspace.selectedCourseIds,
+            completedCourseIds: workspace.completedCourseIds
+        });
+    } catch (error) {
+        res.status(500).json({ error: "Could not load workspace." });
+    }
+});
+
+// Save a visitor's own learning list.
+app.put("/api/workspaces/:id", (req, res) => {
+    try {
+        const id = req.params.id;
+        const { selectedCourseIds, completedCourseIds } = req.body;
+
+        if (!validWorkspaceId(id)) {
+            return res.status(400).json({ error: "Invalid workspace ID." });
+        }
+
+        if (
+            !Array.isArray(selectedCourseIds) ||
+            !Array.isArray(completedCourseIds) ||
+            !selectedCourseIds.every(Number.isInteger) ||
+            !completedCourseIds.every(Number.isInteger)
+        ) {
+            return res.status(400).json({ error: "Invalid learning list." });
         }
 
         const courses = readCourses();
-        const course = courses.find(item => item.id === id);
+        const validIds = new Set(courses.map(course => course.id));
+        const selected = [...new Set(selectedCourseIds)];
+        const completed = [...new Set(completedCourseIds)];
 
-        if (!course) {
-            return res.status(404).json({ error: "Course not found." });
+        if (
+            selected.some(id => !validIds.has(id)) ||
+            completed.some(id => !selected.includes(id))
+        ) {
+            return res.status(400).json({ error: "Learning list contains invalid courses." });
         }
 
-        if (completed) {
-            const missing = (course.prerequisites || []).filter(id => {
-                const prerequisite = courses.find(item => item.id === id);
-                return !prerequisite || !prerequisite.completed;
-            });
+        const workspaces = readWorkspaces();
+        const index = workspaces.findIndex(item => item.id === id);
 
-            if (missing.length > 0) {
-                return res.status(400).json({
-                    error: "Complete prerequisite courses first.",
-                    missingPrerequisites: missing
-                });
-            }
-        }
+        const workspace = {
+            id,
+            selectedCourseIds: selected,
+            completedCourseIds: completed
+        };
 
-        course.completed = completed;
-        saveCourses(courses);
-        res.json(course);
+        if (index === -1) workspaces.push(workspace);
+        else workspaces[index] = workspace;
+
+        saveWorkspaces(workspaces);
+        res.json({ message: "Learning list saved." });
     } catch (error) {
-        res.status(500).json({
-            error: "Could not update course progress."
-        });
+        res.status(500).json({ error: "Could not save workspace." });
     }
 });
 
+// Generate a path using ONLY the visitor's selected courses.
 app.post("/api/optimize", (req, res) => {
-    let courses;
-
     try {
-        courses = readCourses();
-    } catch (error) {
-        return res.status(500).json({
-            error: "Could not read course data."
-        });
-    }
+        const { workspaceId } = req.body;
 
-    if (!fs.existsSync(ENGINE_FILE)) {
-        return res.status(500).json({
-            error: "C++ engine not found. Compile the C++ files first."
-        });
-    }
-
-    let input = `${courses.length}\n`;
-
-    for (const course of courses) {
-        const prerequisites = course.prerequisites || [];
-
-        input += `${course.id} ${course.duration} ${course.rating} `;
-        input += `${course.popularity} ${prerequisites.length}\n`;
-        input += `${course.name.replace(/[\r\n]/g, " ")}\n`;
-
-        if (prerequisites.length > 0) {
-            input += prerequisites.join(" ") + "\n";
+        if (typeof workspaceId !== "string" || !validWorkspaceId(workspaceId)) {
+            return res.status(400).json({ error: "Invalid workspace ID." });
         }
-    }
 
-    const child = spawn(ENGINE_FILE, [], { windowsHide: true });
+        const workspace = getWorkspace(workspaceId);
+        const allCourses = readCourses();
+        const selectedIds = new Set(workspace.selectedCourseIds);
 
-    let output = "";
-    let errorOutput = "";
-    let finished = false;
+        const courses = allCourses.filter(course => selectedIds.has(course.id));
 
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
+        if (courses.length === 0) {
+            return res.status(400).json({
+                error: "Add at least one course to My Learning List."
+            });
+        }
 
-    child.stdout.on("data", chunk => {
-        output += chunk;
-    });
+        if (!fs.existsSync(ENGINE_FILE)) {
+            return res.status(500).json({
+                error: "C++ engine not found. Compile the C++ files first."
+            });
+        }
 
-    child.stderr.on("data", chunk => {
-        errorOutput += chunk;
-    });
+        // Ignore prerequisites that the visitor did not select.
+        let input = `${courses.length}\n`;
 
-    child.on("error", error => {
-        if (finished) return;
-        finished = true;
+        for (const course of courses) {
+            const prerequisites = (course.prerequisites || [])
+                .filter(id => selectedIds.has(id));
+
+            input += `${course.id} ${course.duration} ${course.rating} `;
+            input += `${course.popularity} ${prerequisites.length}\n`;
+            input += `${course.name.replace(/[\r\n]/g, " ")}\n`;
+
+            if (prerequisites.length) {
+                input += prerequisites.join(" ") + "\n";
+            }
+        }
+
+        const child = spawn(ENGINE_FILE, [], { windowsHide: true });
+        let output = "";
+        let errorOutput = "";
+        let finished = false;
+
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+
+        child.stdout.on("data", chunk => output += chunk);
+        child.stderr.on("data", chunk => errorOutput += chunk);
+
+        child.on("error", error => {
+            if (finished) return;
+            finished = true;
+            res.status(500).json({
+                error: "Could not start C++ engine.",
+                details: error.message
+            });
+        });
+
+        child.on("close", code => {
+            if (finished) return;
+            finished = true;
+
+            if (code !== 0) {
+                return res.status(500).json({
+                    error: "C++ engine failed.",
+                    details: errorOutput || output
+                });
+            }
+
+            try {
+                const result = JSON.parse(output);
+
+                if (result.error) {
+                    return res.status(400).json(result);
+                }
+
+                const recommendations = [];
+
+                for (const course of courses) {
+                    for (const prerequisiteId of course.prerequisites || []) {
+                        if (!selectedIds.has(prerequisiteId)) {
+                            const prerequisite = allCourses.find(
+                                item => item.id === prerequisiteId
+                            );
+
+                            if (prerequisite && !recommendations.some(
+                                item => item.id === prerequisite.id
+                            )) {
+                                recommendations.push({
+                                    id: prerequisite.id,
+                                    name: prerequisite.name
+                                });
+                            }
+                        }
+                    }
+                }
+
+                result.recommendedPrerequisites = recommendations;
+                res.json(result);
+            } catch (error) {
+                res.status(500).json({
+                    error: "C++ engine returned invalid JSON.",
+                    details: error.message
+                });
+            }
+        });
+
+        child.stdin.on("error", () => {});
+        child.stdin.end(input);
+
+    } catch (error) {
         res.status(500).json({
-            error: "Could not start the C++ engine.",
+            error: "Could not generate learning path.",
             details: error.message
         });
-    });
-
-    child.on("close", code => {
-        if (finished) return;
-        finished = true;
-
-        if (code !== 0) {
-            return res.status(500).json({
-                error: "The C++ engine failed.",
-                details: errorOutput || output
-            });
-        }
-
-        try {
-            const result = JSON.parse(output);
-            if (result.error) {
-                return res.status(400).json(result);
-            }
-            res.json(result);
-        } catch (error) {
-            res.status(500).json({
-                error: "The C++ engine returned invalid JSON."
-            });
-        }
-    });
-
-    child.stdin.on("error", () => {});
-    child.stdin.end(input);
+    }
 });
 
 app.use("/api", (req, res) => {

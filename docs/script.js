@@ -1,295 +1,304 @@
-const courseList = document.getElementById("course-list");
-const courseMessage = document.getElementById("course-message");
-const courseForm = document.getElementById("course-form");
-const formMessage = document.getElementById("form-message");
-const prerequisiteSelect = document.getElementById("course-prerequisites");
-const optimizeButton = document.getElementById("optimize-button");
-const pathMessage = document.getElementById("path-message");
-const pathResults = document.getElementById("path-results");
+const API_BASE = "http://localhost:3000";
 
-let courses = [];
-let nextId = 1;
+function getWorkspaceId() {
+    let id = localStorage.getItem("learningWorkspaceId");
 
-function showMessage(element, message, type = "") {
-    element.textContent = message;
-    element.className = "message";
-    if (type) element.classList.add(type);
+    if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem("learningWorkspaceId", id);
+    }
+
+    return id;
 }
 
-function updateStatistics() {
-    document.getElementById("total-courses").textContent = courses.length;
-    document.getElementById("completed-courses").textContent =
-        courses.filter(course => course.completed).length;
-    document.getElementById("total-duration").textContent =
-        courses.reduce((sum, course) => sum + Number(course.duration || 0), 0);
+const workspaceId = getWorkspaceId();
+
+let availableCourses = [];
+let selectedCourseIds = [];
+let completedCourseIds = [];
+
+const availableContainer = document.getElementById("availableCourses");
+const myCoursesContainer = document.getElementById("myCourses");
+const pathContainer = document.getElementById("learningPath");
+const messageBox = document.getElementById("message");
+
+function showMessage(message, isError = false) {
+    messageBox.textContent = message;
+    messageBox.className = isError ? "error-message" : "success-message";
 }
 
-function getCourseName(id) {
-    const course = courses.find(item => Number(item.id) === Number(id));
-    return course ? course.name : `Course ${id}`;
+function escapeHTML(value) {
+    return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+    })[char]);
 }
 
-function renderPrerequisites() {
-    const selected = new Set(
-        Array.from(prerequisiteSelect.selectedOptions).map(option => Number(option.value))
+async function apiRequest(endpoint, options = {}) {
+    const response = await fetch(API_BASE + endpoint, {
+        ...options,
+        headers: {
+            "Content-Type": "application/json",
+            ...(options.headers || {})
+        }
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+        throw new Error(data.error || data.message || "Request failed.");
+    }
+
+    return data;
+}
+
+async function loadData() {
+    try {
+        const [courseData, workspaceData] = await Promise.all([
+            apiRequest("/api/courses"),
+            apiRequest("/api/workspaces/" + encodeURIComponent(workspaceId))
+        ]);
+
+        availableCourses = courseData.courses || [];
+        selectedCourseIds = workspaceData.selectedCourseIds || [];
+        completedCourseIds = workspaceData.completedCourseIds || [];
+
+        renderAvailableCourses();
+        renderMyCourses();
+        populatePrerequisites();
+
+        showMessage("Courses loaded successfully.");
+    } catch (error) {
+        showMessage(error.message + " Make sure the backend is running.", true);
+    }
+}
+
+function renderAvailableCourses() {
+    if (!availableCourses.length) {
+        availableContainer.innerHTML = "<p>No courses available yet.</p>";
+        return;
+    }
+
+    availableContainer.innerHTML = availableCourses.map(course => {
+        const selected = selectedCourseIds.includes(course.id);
+
+        return `
+            <article class="course-card">
+                <h3>${escapeHTML(course.name)}</h3>
+                <p><strong>Category:</strong> ${escapeHTML(course.category)}</p>
+                <p><strong>Duration:</strong> ${course.duration} hours</p>
+                <p><strong>Rating:</strong> ${course.rating}/5</p>
+                <p><strong>Popularity:</strong> ${course.popularity}/100</p>
+                <button class="${selected ? "secondary-btn" : "primary-btn"}"
+                    onclick="toggleCourse(${course.id})"
+                    ${selected ? "disabled" : ""}>
+                    ${selected ? "Added to My List" : "Add to My List"}
+                </button>
+            </article>
+        `;
+    }).join("");
+}
+
+function renderMyCourses() {
+    const myCourses = availableCourses.filter(course =>
+        selectedCourseIds.includes(course.id)
     );
-    prerequisiteSelect.replaceChildren();
 
-    courses.forEach(course => {
-        const option = document.createElement("option");
-        option.value = course.id;
-        option.textContent = `${course.name} (#${course.id})`;
-        option.selected = selected.has(course.id);
-        prerequisiteSelect.appendChild(option);
-    });
-}
-
-function renderCourses() {
-    updateStatistics();
-    courseList.replaceChildren();
-
-    if (!courses.length) {
-        const empty = document.createElement("p");
-        empty.className = "empty-state";
-        empty.textContent = "No courses available. Add your first course!";
-        courseList.appendChild(empty);
-        renderPrerequisites();
+    if (!myCourses.length) {
+        myCoursesContainer.innerHTML =
+            "<p>You haven't added any courses to your learning list.</p>";
         return;
     }
 
-    courses.forEach(course => {
-        const card = document.createElement("article");
-        card.className = "course-card";
+    myCoursesContainer.innerHTML = myCourses.map(course => {
+        const completed = completedCourseIds.includes(course.id);
 
-        const category = document.createElement("span");
-        category.className = "course-category";
-        category.textContent = course.category;
-
-        const title = document.createElement("h3");
-        title.textContent = course.name;
-
-        const duration = document.createElement("p");
-        duration.textContent = `Duration: ${course.duration} hours`;
-
-        const rating = document.createElement("p");
-        rating.textContent = `Rating: ${course.rating} / 5`;
-
-        const popularity = document.createElement("p");
-        popularity.textContent = `Popularity: ${course.popularity} / 100`;
-
-        const prereqs = document.createElement("p");
-        const names = (course.prerequisites || []).map(getCourseName);
-        prereqs.textContent = names.length
-            ? `Prerequisites: ${names.join(", ")}`
-            : "Prerequisites: None";
-
-        const meta = document.createElement("div");
-        meta.className = "course-meta";
-
-        const status = document.createElement("span");
-        status.textContent = course.completed ? "✓ Completed" : "In progress";
-
-        const id = document.createElement("span");
-        id.textContent = `Course #${course.id}`;
-        meta.append(status, id);
-
-        const actions = document.createElement("div");
-        actions.className = "course-actions";
-
-        const button = document.createElement("button");
-        button.className = "complete-button";
-        button.textContent = course.completed ? "Mark Incomplete" : "Mark Completed";
-        button.addEventListener("click", () => {
-            course.completed = !course.completed;
-            renderCourses();
-        });
-
-        actions.appendChild(button);
-        card.append(category, title, duration, rating, popularity, prereqs, meta, actions);
-        courseList.appendChild(card);
-    });
-
-    renderPrerequisites();
+        return `
+            <article class="course-card">
+                <h3>${escapeHTML(course.name)}</h3>
+                <p><strong>Category:</strong> ${escapeHTML(course.category)}</p>
+                <p><strong>Duration:</strong> ${course.duration} hours</p>
+                <p><strong>Status:</strong> ${completed ? "Completed" : "Not completed"}</p>
+                <button class="secondary-btn" onclick="toggleCompleted(${course.id})">
+                    ${completed ? "Mark Not Completed" : "Mark Completed"}
+                </button>
+                <button class="remove-btn" onclick="removeCourse(${course.id})">
+                    Remove from My List
+                </button>
+            </article>
+        `;
+    }).join("");
 }
 
-async function loadCourses() {
-    showMessage(courseMessage, "Loading courses...");
+async function saveWorkspace() {
+    await apiRequest("/api/workspaces/" + encodeURIComponent(workspaceId), {
+        method: "PUT",
+        body: JSON.stringify({
+            selectedCourseIds,
+            completedCourseIds
+        })
+    });
+}
 
+async function toggleCourse(courseId) {
     try {
-        const response = await fetch("./data/courses.json");
-        if (!response.ok) throw new Error("Could not load course data.");
+        if (!selectedCourseIds.includes(courseId)) {
+            selectedCourseIds.push(courseId);
+        }
 
-        const data = await response.json();
-        courses = data.courses.map(course => ({ ...course }));
-        nextId = Math.max(0, ...courses.map(course => Number(course.id))) + 1;
-
-        renderCourses();
-        showMessage(courseMessage, `${courses.length} courses loaded.`, "success");
+        await saveWorkspace();
+        renderAvailableCourses();
+        renderMyCourses();
+        showMessage("Course added to your learning list.");
     } catch (error) {
-        showMessage(courseMessage, "Could not load courses. Please refresh the page.", "error");
-        courseList.replaceChildren();
-
-        const message = document.createElement("p");
-        message.className = "empty-state";
-        message.textContent = error.message;
-        courseList.appendChild(message);
+        showMessage(error.message, true);
     }
 }
 
-function generateLearningPath() {
-    optimizeButton.disabled = true;
-    optimizeButton.textContent = "Optimizing...";
-    pathResults.replaceChildren();
-
+async function removeCourse(courseId) {
     try {
-        const indegree = new Map(courses.map(course => [course.id, 0]));
-        const nextCourses = new Map(courses.map(course => [course.id, []]));
+        selectedCourseIds = selectedCourseIds.filter(id => id !== courseId);
+        completedCourseIds = completedCourseIds.filter(id => id !== courseId);
 
-        for (const course of courses) {
-            for (const prerequisite of course.prerequisites || []) {
-                if (!indegree.has(prerequisite)) {
-                    throw new Error(`Missing prerequisite course ${prerequisite}.`);
-                }
-                indegree.set(course.id, indegree.get(course.id) + 1);
-                nextCourses.get(prerequisite).push(course.id);
-            }
-        }
-
-        const queue = courses
-            .filter(course => indegree.get(course.id) === 0)
-            .map(course => course.id);
-
-        const order = [];
-        while (queue.length) {
-            const id = queue.shift();
-            order.push(id);
-
-            for (const nextId of nextCourses.get(id)) {
-                indegree.set(nextId, indegree.get(nextId) - 1);
-                if (indegree.get(nextId) === 0) queue.push(nextId);
-            }
-        }
-
-        if (order.length !== courses.length) {
-            throw new Error("A prerequisite cycle was detected. Please review the prerequisites.");
-        }
-
-        const orderedCourses = order.map(id => courses.find(course => course.id === id));
-        const longest = new Map();
-        const previous = new Map();
-
-        for (const course of orderedCourses) {
-            longest.set(course.id, course.duration);
-            previous.set(course.id, null);
-
-            for (const prerequisite of course.prerequisites || []) {
-                const candidate = longest.get(prerequisite) + course.duration;
-                if (candidate > longest.get(course.id)) {
-                    longest.set(course.id, candidate);
-                    previous.set(course.id, prerequisite);
-                }
-            }
-        }
-
-        const totalDuration = courses.reduce((sum, course) => sum + course.duration, 0);
-        let endId = null;
-        let longestPathDuration = 0;
-
-        for (const course of orderedCourses) {
-            if (longest.get(course.id) > longestPathDuration) {
-                longestPathDuration = longest.get(course.id);
-                endId = course.id;
-            }
-        }
-
-        const criticalPath = [];
-        while (endId !== null) {
-            criticalPath.unshift(courses.find(course => course.id === endId));
-            endId = previous.get(endId);
-        }
-
-        const container = document.createElement("div");
-        container.className = "path-result-card";
-
-        const heading = document.createElement("h3");
-        heading.textContent = "Your Recommended Learning Path";
-
-        const summary = document.createElement("p");
-        summary.textContent =
-            `Courses: ${orderedCourses.length} | Total course duration: ${totalDuration} hours`;
-
-        const longestText = document.createElement("p");
-        longestText.textContent = `Longest prerequisite path: ${longestPathDuration} hours`;
-
-        const list = document.createElement("ol");
-        list.className = "path-list";
-
-        orderedCourses.forEach(course => {
-            const item = document.createElement("li");
-            item.textContent = `${course.name} — ${course.duration} hours`;
-            list.appendChild(item);
-        });
-
-        const criticalHeading = document.createElement("h4");
-        criticalHeading.textContent = "Longest prerequisite sequence";
-
-        const criticalList = document.createElement("ol");
-        criticalPath.forEach(course => {
-            const item = document.createElement("li");
-            item.textContent = `${course.name} — ${course.duration} hours`;
-            criticalList.appendChild(item);
-        });
-
-        container.append(heading, summary, longestText, list, criticalHeading, criticalList);
-        pathResults.appendChild(container);
-        showMessage(pathMessage, "Learning path generated successfully!", "success");
+        await saveWorkspace();
+        renderAvailableCourses();
+        renderMyCourses();
+        pathContainer.innerHTML = "<p>Generate a new path after changing your list.</p>";
+        showMessage("Course removed from your personal list.");
     } catch (error) {
-        showMessage(pathMessage, error.message, "error");
-    } finally {
-        optimizeButton.disabled = false;
-        optimizeButton.textContent = "Generate Learning Path";
+        showMessage(error.message, true);
     }
 }
 
-courseForm.addEventListener("submit", event => {
-    event.preventDefault();
+async function toggleCompleted(courseId) {
+    try {
+        if (completedCourseIds.includes(courseId)) {
+            completedCourseIds = completedCourseIds.filter(id => id !== courseId);
+        } else {
+            completedCourseIds.push(courseId);
+        }
 
-    const name = document.getElementById("course-name").value.trim();
-    const category = document.getElementById("course-category").value.trim();
-    const duration = Number(document.getElementById("course-duration").value);
-    const rating = Number(document.getElementById("course-rating").value);
-    const popularity = Number(document.getElementById("course-popularity").value);
-    const prerequisites = Array.from(prerequisiteSelect.selectedOptions)
-        .map(option => Number(option.value));
-
-    if (!name || !category || duration <= 0 ||
-        rating < 0 || rating > 5 || popularity < 0 || popularity > 100) {
-        showMessage(formMessage, "Please enter valid course details.", "error");
-        return;
+        await saveWorkspace();
+        renderMyCourses();
+        showMessage("Your progress has been updated.");
+    } catch (error) {
+        showMessage(error.message, true);
     }
+}
 
-    if (prerequisites.includes(nextId)) {
-        showMessage(formMessage, "A course cannot be its own prerequisite.", "error");
-        return;
-    }
+function populatePrerequisites() {
+    const select = document.getElementById("coursePrerequisites");
 
-    courses.push({
-        id: nextId++,
-        name,
-        category,
-        duration,
-        rating,
-        popularity,
-        prerequisites,
-        completed: false
-    });
+    select.innerHTML = availableCourses.map(course => `
+        <option value="${course.id}">${escapeHTML(course.name)}</option>
+    `).join("");
+}
 
-    courseForm.reset();
-    renderCourses();
-    showMessage(formMessage, "Course added successfully for this session!", "success");
+document.getElementById("showAddCourse").addEventListener("click", () => {
+    document.getElementById("addCourseForm").classList.remove("hidden");
 });
 
-document.getElementById("refresh-courses").addEventListener("click", loadCourses);
-optimizeButton.addEventListener("click", generateLearningPath);
+document.getElementById("cancelAddCourse").addEventListener("click", () => {
+    document.getElementById("addCourseForm").classList.add("hidden");
+});
 
-loadCourses();
+document.getElementById("courseForm").addEventListener("submit", async event => {
+    event.preventDefault();
+
+    const prerequisites = Array.from(
+        document.getElementById("coursePrerequisites").selectedOptions
+    ).map(option => Number(option.value));
+
+    const newCourse = {
+        name: document.getElementById("courseName").value.trim(),
+        category: document.getElementById("courseCategory").value.trim(),
+        duration: Number(document.getElementById("courseDuration").value),
+        rating: Number(document.getElementById("courseRating").value),
+        popularity: Number(document.getElementById("coursePopularity").value),
+        prerequisites
+    };
+
+    try {
+        await apiRequest("/api/courses", {
+            method: "POST",
+            body: JSON.stringify(newCourse)
+        });
+
+        event.target.reset();
+        document.getElementById("addCourseForm").classList.add("hidden");
+
+        await loadData();
+        showMessage("Course added to the common catalogue.");
+    } catch (error) {
+        showMessage(error.message, true);
+    }
+});
+
+document.getElementById("generatePath").addEventListener("click", async () => {
+    if (!selectedCourseIds.length) {
+        showMessage("Please add at least one course to My Learning List.", true);
+        return;
+    }
+
+    try {
+        pathContainer.innerHTML = "<p>Generating your learning path...</p>";
+
+        const result = await apiRequest("/api/optimize", {
+            method: "POST",
+            body: JSON.stringify({ workspaceId })
+        });
+
+        displayLearningPath(result);
+        showMessage("Your learning path has been generated.");
+    } catch (error) {
+        pathContainer.innerHTML = "";
+        showMessage(error.message, true);
+    }
+});
+
+function displayLearningPath(result) {
+    const path = result.learningPath || [];
+
+    if (!path.length) {
+        pathContainer.innerHTML = "<p>No learning path was returned.</p>";
+        return;
+    }
+
+    const pathHTML = path.map((course, index) => `
+        <div class="path-item">
+            <span class="path-number">${index + 1}</span>
+            <div>
+                <strong>${escapeHTML(course.name)}</strong>
+            </div>
+        </div>
+    `).join("");
+
+    let recommendationHTML = "";
+
+    if (result.recommendedPrerequisites?.length) {
+        recommendationHTML = `
+            <div class="recommendations">
+                <h3>Optional prerequisite recommendations</h3>
+                <p>These courses may help you understand your selected courses better. You do not have to add them.</p>
+                <ul>
+                    ${result.recommendedPrerequisites.map(course =>
+                        `<li>${escapeHTML(course.name)}</li>`
+                    ).join("")}
+                </ul>
+            </div>
+        `;
+    }
+
+    pathContainer.innerHTML = `
+        <h3>Your Recommended Learning Order</h3>
+        ${pathHTML}
+        <p><strong>Total Duration:</strong> ${result.totalDuration} hours</p>
+        <p><strong>Longest Prerequisite Path:</strong> ${result.longestPathDuration} hours</p>
+        ${recommendationHTML}
+    `;
+}
+
+loadData();

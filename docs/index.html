@@ -7,145 +7,78 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <header class="navbar">
-        <div class="logo">LearnPath</div>
-        <nav>
-            <a href="#home">Home</a>
-            <a href="#courses">Courses</a>
-            <a href="#add-course">Add Course</a>
-            <a href="#learning-path">Learning Path</a>
-        </nav>
+    <header>
+        <h1>E-Learning Course Path Optimizer</h1>
+        <p>Choose the courses you want to learn and create your own learning path.</p>
     </header>
 
     <main>
-        <section id="home" class="hero">
-            <p class="eyebrow">SMARTER LEARNING STARTS HERE</p>
-            <h1>Build Your Own<br><span>Learning Journey</span></h1>
-            <p class="hero-description">
-                Discover the right order to learn courses using prerequisites,
-                course ratings, and intelligent path optimization.
-            </p>
-            <a class="primary-button" href="#courses">Explore Courses</a>
+        <section class="intro">
+            <h2>Welcome to Your Learning Space</h2>
+            <p>Explore courses, build your personal list and discover a recommended learning order.</p>
         </section>
 
-        <section class="stats">
-            <div class="stat-card">
-                <h2 id="total-courses">0</h2>
-                <p>Total Courses</p>
-            </div>
-            <div class="stat-card">
-                <h2 id="completed-courses">0</h2>
-                <p>Completed Courses</p>
-            </div>
-            <div class="stat-card">
-                <h2 id="total-duration">0</h2>
-                <p>Total Learning Hours</p>
-            </div>
-        </section>
-
-        <section id="courses" class="section">
+        <section>
             <div class="section-heading">
-                <div>
-                    <p class="eyebrow">YOUR COURSE LIBRARY</p>
-                    <h2>Explore Courses</h2>
-                    <p>View available courses and their prerequisites.</p>
-                </div>
-                <button id="refresh-courses" class="secondary-button">
-                    Refresh
-                </button>
+                <h2>Available Courses</h2>
+                <button id="showAddCourse" class="primary-btn">+ Add New Course</button>
             </div>
-
-            <p id="course-message" class="message" role="status"></p>
-            <div id="course-list" class="course-grid">
+            <div id="availableCourses" class="course-grid">
                 <p>Loading courses...</p>
             </div>
         </section>
 
-        <section id="add-course" class="section form-section">
-            <div class="section-heading">
-                <div>
-                    <p class="eyebrow">EXPAND YOUR KNOWLEDGE</p>
-                    <h2>Add a New Course</h2>
-                    <p>Enter course details to add it to your library.</p>
+        <section id="addCourseForm" class="form-section hidden">
+            <h2>Add a New Course to the Common Catalogue</h2>
+            <form id="courseForm">
+                <label for="courseName">Course Name</label>
+                <input id="courseName" required maxlength="150">
+
+                <label for="courseCategory">Category</label>
+                <input id="courseCategory" required>
+
+                <label for="courseDuration">Duration (hours)</label>
+                <input id="courseDuration" type="number" min="0.1" step="0.1" required>
+
+                <label for="courseRating">Rating (0–5)</label>
+                <input id="courseRating" type="number" min="0" max="5" step="0.1" required>
+
+                <label for="coursePopularity">Popularity (0–100)</label>
+                <input id="coursePopularity" type="number" min="0" max="100" required>
+
+                <label for="coursePrerequisites">Prerequisites (optional)</label>
+                <select id="coursePrerequisites" multiple></select>
+                <small>Hold Ctrl while selecting multiple courses on a computer. Leave empty if there are no prerequisites.</small>
+
+                <div class="form-buttons">
+                    <button type="submit" class="primary-btn">Add Course</button>
+                    <button type="button" id="cancelAddCourse" class="secondary-btn">Cancel</button>
                 </div>
-            </div>
-
-            <form id="course-form">
-                <div class="form-grid">
-                    <label>
-                        Course Name
-                        <input type="text" id="course-name"
-                            maxlength="150" required
-                            placeholder="e.g. Python Programming">
-                    </label>
-
-                    <label>
-                        Category
-                        <input type="text" id="course-category"
-                            required placeholder="e.g. Programming">
-                    </label>
-
-                    <label>
-                        Duration (hours)
-                        <input type="number" id="course-duration"
-                            min="0.5" step="0.5" required>
-                    </label>
-
-                    <label>
-                        Rating (0–5)
-                        <input type="number" id="course-rating"
-                            min="0" max="5" step="0.1" required>
-                    </label>
-
-                    <label>
-                        Popularity (0–100)
-                        <input type="number" id="course-popularity"
-                            min="0" max="100" step="1" required>
-                    </label>
-
-                    <label>
-                        Prerequisite Courses
-                        <select id="course-prerequisites" multiple
-                            aria-describedby="prerequisite-help">
-                        </select>
-                        <small id="prerequisite-help">
-                            Hold Ctrl (Windows) to select multiple courses.
-                            Leave empty if there are no prerequisites.
-                        </small>
-                    </label>
-                </div>
-
-                <button type="submit" class="primary-button">
-                    Add Course
-                </button>
-                <p id="form-message" class="message" role="status"></p>
             </form>
         </section>
 
-        <section id="learning-path" class="section path-section">
-            <div class="section-heading">
-                <div>
-                    <p class="eyebrow">PLAN YOUR NEXT STEPS</p>
-                    <h2>Optimized Learning Path</h2>
-                    <p>
-                        Find a valid learning order that respects course
-                        prerequisites.
-                    </p>
-                </div>
+        <section>
+            <h2>My Learning List</h2>
+            <p class="muted">Your choices are saved separately in this browser. Select any courses you are interested in.</p>
+            <div id="myCourses" class="course-grid">
+                <p>Your learning list is empty.</p>
             </div>
-
-            <button id="optimize-button" class="primary-button">
-                Generate Learning Path
-            </button>
-
-            <p id="path-message" class="message" role="status"></p>
-            <div id="path-results"></div>
         </section>
+
+        <section>
+            <h2>Generate Your Learning Path</h2>
+            <p class="muted">You can generate a path with just one course or with many courses. No course is compulsory.</p>
+            <button id="generatePath" class="primary-btn">Generate Learning Path</button>
+            <div id="learningPath" class="path-container">
+                <p>Your generated path will appear here.</p>
+            </div>
+        </section>
+
+        <p id="message" role="status"></p>
     </main>
 
     <footer>
-        <p>LearnPath — E-Learning Course Path Optimizer</p>
-        <p>Built with HTML, CSS, JavaScript, Node.js and C++.</p>
+        <p>E-Learning Course Path Optimizer | Built using C++ and Web Technologies</p>
     </footer>
 
     <script src="script.js"></script>
